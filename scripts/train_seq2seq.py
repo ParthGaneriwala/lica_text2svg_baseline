@@ -5,18 +5,20 @@ from typing import List, Dict
 
 import numpy as np
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, DataCollatorForSeq2Seq, Trainer, TrainingArguments
-from datasets import load_dataset, Dataset
+from datasets import Dataset
+
+import torch  # ⭐ needed for .generate and device handling
 
 # Very simple tokenizer for SVG (replace with a grammar-aware tokenizer later)
 def canonicalize_svg(svg: str) -> str:
-    # strip newlines/extra spaces; this is intentionally simple
     s = re.sub(r"\s+", " ", svg.strip())
-    # clamp viewBox size for stability (optional)
     return s
 
 def build_hf_dataset(train_jsonl, val_jsonl):
     def read_jsonl(p):
-        rows = [json.loads(l) for l in open(p)]
+        # ⭐ Ensure Windows reads UTF-8 and never crashes on rare bytes
+        with open(p, "r", encoding="utf-8", errors="replace") as f:
+            rows = [json.loads(l) for l in f]
         return Dataset.from_list(rows)
     return read_jsonl(train_jsonl), read_jsonl(val_jsonl)
 
@@ -29,9 +31,9 @@ def preprocess(examples, tokenizer, max_src_len, max_tgt_len):
     captions = examples["caption"]
     svgs = [canonicalize_svg(s) for s in examples["svg"]]
     model_inputs = tokenizer(captions, max_length=max_src_len, truncation=True)
-    with tokenizer.as_target_tokenizer():
-        labels = tokenizer(svgs, max_length=max_tgt_len, truncation=True)
-    model_inputs["labels"] = labels["input_ids"]
+    enc = tokenizer(captions, max_length=max_src_len, truncation=True)
+    lbl = tokenizer(text_target=svgs, max_length=max_tgt_len, truncation=True)
+    model_inputs = {**enc, "labels": lbl["input_ids"]}
     return model_inputs
 
 def main():
@@ -57,6 +59,9 @@ def main():
     val_ds = val_ds.map(fn, batched=True, remove_columns=val_ds.column_names)
 
     data_collator = DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model)
+
+    # ⭐ Cleaner device/bfloat handling
+    use_bf16 = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
     training_args = TrainingArguments(
         output_dir=args.output_dir,
         per_device_train_batch_size=args.batch_size,
@@ -67,7 +72,7 @@ def main():
         logging_steps=200,
         num_train_epochs=args.epochs,
         learning_rate=args.lr,
-        bf16=True if "cuda" in str(model.device) else False,
+        bf16=use_bf16,
         save_total_limit=2,
         report_to="none"
     )
@@ -84,18 +89,20 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
 
     # quick qualitative dump on val set
-    val_raw = [json.loads(l) for l in open(args.val_jsonl)]
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")  # ⭐
+    model.to(device)  # ⭐
+    val_raw = [json.loads(l) for l in open(args.val_jsonl, "r", encoding="utf-8", errors="replace")]  # ⭐
     preds = []
     for r in val_raw[:100]:
-        inputs = tokenizer([r["caption"]], return_tensors="pt")
+        inputs = tokenizer([r["caption"]], return_tensors="pt", truncation=True, max_length=args.max_src_len).to(device)  # ⭐
         with torch.no_grad():
             out = model.generate(**inputs, max_length=args.max_tgt_len, num_beams=4)
         svg_pred = tokenizer.decode(out[0], skip_special_tokens=True)
         preds.append({"caption": r["caption"], "svg_pred": svg_pred, "svg_gt": r["svg"]})
 
-    with open(Path(args.output_dir) / "predictions.jsonl", "w") as f:
+    with open(Path(args.output_dir) / "predictions.jsonl", "w", encoding="utf-8") as f:  # ⭐
         for p in preds:
-            f.write(json.dumps(p) + "\n")
+            f.write(json.dumps(p, ensure_ascii=False) + "\n")
 
     print(f"Wrote qualitative predictions to {Path(args.output_dir) / 'predictions.jsonl'}")
 
