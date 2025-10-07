@@ -1,22 +1,29 @@
-import argparse, json, os, re, math
+import argparse, json, os, re
 from pathlib import Path
 from dataclasses import dataclass
-from typing import List, Dict
+import inspect
 
+# ---- keep TF out of the way (optional) ----
+os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
+import torch
 import numpy as np
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, DataCollatorForSeq2Seq, Trainer, TrainingArguments
 from datasets import Dataset
+from transformers import (
+    AutoTokenizer,
+    AutoModelForSeq2SeqLM,
+    DataCollatorForSeq2Seq,
+    Trainer,
+    TrainingArguments,
+)
 
-import torch  # ⭐ needed for .generate and device handling
-
-# Very simple tokenizer for SVG (replace with a grammar-aware tokenizer later)
+# ---- tiny svg canonicalizer ----
 def canonicalize_svg(svg: str) -> str:
-    s = re.sub(r"\s+", " ", svg.strip())
-    return s
+    return re.sub(r"\s+", " ", svg.strip())
 
 def build_hf_dataset(train_jsonl, val_jsonl):
     def read_jsonl(p):
-        # ⭐ Ensure Windows reads UTF-8 and never crashes on rare bytes
         with open(p, "r", encoding="utf-8", errors="replace") as f:
             rows = [json.loads(l) for l in f]
         return Dataset.from_list(rows)
@@ -30,11 +37,49 @@ class Example:
 def preprocess(examples, tokenizer, max_src_len, max_tgt_len):
     captions = examples["caption"]
     svgs = [canonicalize_svg(s) for s in examples["svg"]]
-    model_inputs = tokenizer(captions, max_length=max_src_len, truncation=True)
     enc = tokenizer(captions, max_length=max_src_len, truncation=True)
     lbl = tokenizer(text_target=svgs, max_length=max_tgt_len, truncation=True)
-    model_inputs = {**enc, "labels": lbl["input_ids"]}
-    return model_inputs
+    enc["labels"] = lbl["input_ids"]
+    return enc
+
+def make_training_args(args, use_bf16: bool):
+    # Build kwargs compatible with the installed transformers version
+    sig = inspect.signature(TrainingArguments.__init__)
+    supported = set(sig.parameters.keys())
+
+    kwargs = {
+        "output_dir": args.output_dir,
+        "per_device_train_batch_size": args.batch_size,
+        "per_device_eval_batch_size": args.batch_size,
+        "num_train_epochs": args.epochs,
+        "learning_rate": args.lr,
+        "save_total_limit": 2,
+        "report_to": "none",
+    }
+
+    # Optional, if present in your version:
+    if "logging_steps" in supported:
+        kwargs["logging_steps"] = 200
+    if "save_steps" in supported:
+        kwargs["save_steps"] = 2000
+    if "evaluation_strategy" in supported:
+        kwargs["evaluation_strategy"] = "steps"
+        if "eval_steps" in supported:
+            kwargs["eval_steps"] = 2000
+    elif "evaluate_during_training" in supported:
+        # very old transformers (<3.x)
+        kwargs["evaluate_during_training"] = True
+
+    if "bf16" in supported:
+        kwargs["bf16"] = use_bf16
+
+    # Nice-to-haves if available:
+    if "remove_unused_columns" in supported:
+        kwargs["remove_unused_columns"] = True
+    if "load_best_model_at_end" in supported:
+        kwargs["load_best_model_at_end"] = False
+
+    return TrainingArguments(**kwargs)
 
 def main():
     ap = argparse.ArgumentParser()
@@ -60,22 +105,8 @@ def main():
 
     data_collator = DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model)
 
-    # ⭐ Cleaner device/bfloat handling
     use_bf16 = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
-    training_args = TrainingArguments(
-        output_dir=args.output_dir,
-        per_device_train_batch_size=args.batch_size,
-        per_device_eval_batch_size=args.batch_size,
-        evaluation_strategy="steps",
-        eval_steps=2000,
-        save_steps=2000,
-        logging_steps=200,
-        num_train_epochs=args.epochs,
-        learning_rate=args.lr,
-        bf16=use_bf16,
-        save_total_limit=2,
-        report_to="none"
-    )
+    training_args = make_training_args(args, use_bf16)
 
     trainer = Trainer(
         model=model,
@@ -88,19 +119,20 @@ def main():
     trainer.train()
     os.makedirs(args.output_dir, exist_ok=True)
 
-    # quick qualitative dump on val set
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")  # ⭐
-    model.to(device)  # ⭐
-    val_raw = [json.loads(l) for l in open(args.val_jsonl, "r", encoding="utf-8", errors="replace")]  # ⭐
+    # ---- quick qualitative dump on val set ----
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
+    with open(args.val_jsonl, "r", encoding="utf-8", errors="replace") as f:
+        val_raw = [json.loads(l) for l in f]
     preds = []
     for r in val_raw[:100]:
-        inputs = tokenizer([r["caption"]], return_tensors="pt", truncation=True, max_length=args.max_src_len).to(device)  # ⭐
+        inputs = tokenizer([r["caption"]], return_tensors="pt", truncation=True, max_length=args.max_src_len).to(device)
         with torch.no_grad():
             out = model.generate(**inputs, max_length=args.max_tgt_len, num_beams=4)
         svg_pred = tokenizer.decode(out[0], skip_special_tokens=True)
         preds.append({"caption": r["caption"], "svg_pred": svg_pred, "svg_gt": r["svg"]})
 
-    with open(Path(args.output_dir) / "predictions.jsonl", "w", encoding="utf-8") as f:  # ⭐
+    with open(Path(args.output_dir) / "predictions.jsonl", "w", encoding="utf-8") as f:
         for p in preds:
             f.write(json.dumps(p, ensure_ascii=False) + "\n")
 
