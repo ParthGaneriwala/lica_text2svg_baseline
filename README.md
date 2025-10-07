@@ -129,13 +129,13 @@ Failures: {'raster': 0, 'ssim': 0, 'lpips': 0, 'clip': 0}
 ### PowerShell runners
 # Baseline
 ```bash
-python scripts/evaluate_v3_full.py --pred_jsonl outputs/t5_v1_baseline/predictions.jsonl --metrics raster_ssim,lpips,clipscore,token_edit --size 224 --debug
+python scripts/evaluate.py --pred_jsonl outputs/t5_v1_baseline/predictions.jsonl --metrics raster_ssim,lpips,clipscore,token_edit --size 224 --debug
 
 # Grammar Tokenizer
-python scripts/evaluate_v3_full.py --pred_jsonl outputs/t5_v2_lite_mem/predictions.jsonl --metrics raster_ssim,lpips,clipscore,token_edit --size 224 --debug
+python scripts/evaluate.py --pred_jsonl outputs/t5_v2_lite_mem/predictions.jsonl --metrics raster_ssim,lpips,clipscore,token_edit --size 224 --debug
 
 # Grammar + Constrained
-python scripts/evaluate_v3_full.py --pred_jsonl outputs/t5_v3_grammar_constrained/predictions.jsonl --metrics raster_ssim,lpips,clipscore,token_edit --size 224 --debug
+python scripts/evaluate.py --pred_jsonl outputs/t5_v3_grammar_constrained/predictions.jsonl --metrics raster_ssim,lpips,clipscore,token_edit --size 224 --debug
 ```
 
 ## Repo Layout
