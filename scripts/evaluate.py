@@ -3,7 +3,7 @@ from pathlib import Path
 from PIL import Image
 import numpy as np
 
-# --- Prefer Skia on Windows, fallback to CairoSVG ---
+
 try:
     import skia  # pip install skia-python
 except Exception:
@@ -13,7 +13,6 @@ try:
 except Exception:
     cairosvg = None
 
-# Optional deps for metrics (all handled gracefully if missing)
 try:
     import torch
 except Exception:
@@ -120,7 +119,6 @@ def rasterize_svg(svg_str, size=224):
         # Render
         dom.render(canvas)
 
-        # Snapshot → PNG → PIL
         img = surface.makeImageSnapshot()
         data = img.encodeToData()  # PNG
         return Image.open(io.BytesIO(bytes(data))).convert("RGB")

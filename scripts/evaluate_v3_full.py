@@ -22,7 +22,6 @@ except Exception: lpips = None
 try: import open_clip
 except Exception: open_clip = None
 
-# ---------- SVG auto-fix ----------
 _ALLOWED_EMPTY = {"path","rect","circle","ellipse","line","polyline","polygon","stop"}
 _SVG_ROOT_TMPL = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">{content}</svg>'
 
