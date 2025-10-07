@@ -6,7 +6,6 @@ from svg_tokens import tokenize_svg, detokenize, special_tokens
 from svg_constraints import SVGConstrainedProcessor
 import inspect
 
-# ---- keep TF out of the way (optional) ----
 os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
@@ -152,7 +151,7 @@ def main():
                 logits_processor=lp, early_stopping=False
             )
         text = tokenizer.decode(out[0], skip_special_tokens=True)
-        # If grammar used, text is tokens separated by spaces → detokenize to SVG
+        # If grammar used, text is tokens separated by spaces then detokenize to SVG
         if args.use_svg_grammar:
             toks = text.split()
             svg_pred = detokenize(toks)
