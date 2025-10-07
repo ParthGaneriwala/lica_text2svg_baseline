@@ -139,24 +139,29 @@ python scripts/evaluate_v3_full.py --pred_jsonl outputs/t5_v3_grammar_constraine
 ```
 
 ## Repo Layout
-scripts/
-  prepare_data.py
-  retrieval_demo.py
-  train_seq2seq_v1_baseline.py
-  train_seq2seq_v2_lite_memory.py
-  train_seq2seq_v3_grammar_constrained.py
-  svg_tokens.py
-  svg_constraints.py
-  evaluate_v1_minimal.py
-  evaluate_v2_raster.py
-  evaluate_v3_full.py
-  make_svg_comparison.py
-data/
-outputs/
+
+    scripts/
+      prepare_data.py
+      retrieval_demo.py
+      train_seq2seq_v1_baseline.py
+      train_seq2seq_v2_lite_memory.py
+      train_seq2seq_v3_grammar_constrained.py
+      svg_tokens.py
+      svg_constraints.py
+      evaluate_v1_minimal.py
+      evaluate_v2_raster.py
+      evaluate_v3_full.py
+      make_svg_comparison.py
+    data/
+    outputs/
+
 
 ## References
 
 T5: Raffel et al., JMLR 2020
+
 DeepSVG: Carlier et al., NeurIPS 2020
+
 DiffVG: Li et al., SIGGRAPH 2020
+
 CLIP: Radford et al., ICML 2021
